@@ -1,5 +1,5 @@
 name: hugo
-image: fluxcd/website:hugo-support
+image: kingdonb/website:hugo-support
 workdir: /site
 # command: ["bash", "--login"]
 command:
