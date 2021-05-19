@@ -39,45 +39,73 @@ If you're getting started and maybe have not much experience with Jenkins, (or i
 
 #### Jenkins Builds OCI Images
 
-While many companies and people may use Jenkins for building Docker images, it isn't actually true that Jenkins builds Docker images. Docker builds OCI images, and Jenkins can shell out to Docker to build images. Jenkins always uses some other tool to build OCI images. Docker may still be the most commonly reported such tool at the time of this writing, but other tools are growing in popularity like [Porter](https://porter.sh), [Buildpacks.io](https://buildpacks.io), [Earthfile](https://earthly.dev), and surely many others we have not seen.
+While many companies and people may use Jenkins for building Docker images, it isn't actually true that Jenkins builds Docker images.
 
-One might use [declarative pipelines](https://www.jenkins.io/doc/book/pipeline/docker/) to include the CI configuration in application repos by writing a Jenkinsfile with many varied approaches. We might use the [docker plugin](https://plugins.jenkins.io/docker-plugin/), or a privileged pod that uses a HostPath volume to get access to `/var/run/docker.sock`.
+Docker builds OCI images, and Jenkins can shell out to Docker to build images.
 
-Proposing these ideas may also land us on the naughty list, (or hopefully attract the attention of InfoSec advocates at a design review,) as these are generally acknowledged as **extremely dangerous**, and you should not ever do these things without understanding why, with untrusted code from an unverified source, or anywhere with access to a production cluster.
+Jenkins always uses some other tool to build OCI images. Docker may still be the most commonly reported such tool in use as of this writing, but other tools are growing in popularity like [Porter], [Buildpacks.io], [Earthfile], and many others we have not seen, many which could be used with Jenkins.
 
-(That's fine, and we already acknowledged that Jenkins-CI is to be completely separated from production, according to Flux...)
+One might use [declarative pipelines] to include the CI configuration in application repos by writing a Jenkinsfile to suit your own needs. We might use the [docker plugin], or a privileged pod with HostPath volume to mount `/var/run/docker.sock`. There are many strategies; this example only shows one way.
 
-We might also be running Jenkins on a Kubernetes cluster that doesn't even have Docker underneath. In this case you may want to use another tool to produce OCI images with Jenkins.
+#### Security Concerns
 
-Here, we will use a privileged pod with access to Docker on the host to its most positive effect, by building the image on a single node cluster which is specially earmarked and set aside for Jenkins builds. This is so that local storage can be invoked while building and testing images. When the next stage of the pipeline is executed after the image is built, there is no need to push or pull from a remote image registry before reaching the release stage.
+This should attract the attention of InfoSec advocates, as privileged pods and HostPath volumes are generally acknowledged as **extremely dangerous**.
 
-Now while this strategy is efficient, it will only work if Kubernetes is running Docker underneath (and that is certainly getting less common now, though it should fortunately remain possible into the future now that [Mirantis has taken over support of dockershim](https://www.mirantis.com/blog/mirantis-to-take-over-support-of-kubernetes-dockershim-2/).)
+You should not ever do these things without understanding the risks. Don't run untrusted code from an unverified source, anywhere near a production cluster. (OK, that's fine, and we already acknowledged that Jenkins-CI is to be completely separated from production, according to Flux...)
 
-Affected Jenkins users will have to find a way of making this work, depending on your situation. None of this is in scope for Flux to explain, as Flux separates the responsibilities of CI and CD across these well-defined boundaries. Whatever tool you use for building images, this document aims to explain and show compatible choices that work well with Flux.
+#### Dockershim was formally deprecated
 
-It should be clear that we can use any competing tool for building images, (with or without Jenkins involvement,) and much of the same advice for working with Flux will still apply.
+We might also be running Jenkins on a Kubernetes cluster that [doesn't even have Docker underneath]. In this case you may want to use another tool to produce OCI images with Jenkins.
+
+Here, we will use a privileged pod with access to Docker on the host to its most positive effect, by building the image on a single node cluster which is specially earmarked and set aside for Jenkins builds.
+
+This is so that we can leverage Docker's node-local image storage while building and testing images. When the next stage of the pipeline is executed after an image is built, there is no need to push or pull from a remote image registry as we are on the same machine where the image was built.
+
+Now while this strategy is efficient, it will only work if Kubernetes is running Docker underneath (and that is certainly getting less common now, though it should fortunately remain possible into the future now that [Mirantis has taken over support of dockershim].)
+
+##### CI is out of scope for Flux
+
+Jenkins users will have to find a way of making sense of all this, depending on the details of your situation. None of this is reasonably in scope for Flux to solve, as Flux separates the responsibilities of CI and CD across these well-defined boundaries.
+
+Whatever tool you use for building images, this document aims to explain and show compatible choices that work well with Flux.
+
+It should be clear that if we use Jenkins or Docker, or any other competing tool for building images, much of the same advice for working with Flux will still apply.
 
 #### What Should We Do?
 
-We recommend users implement SemVer and/or [Sortable image tags][Sortable image tags], to enable the use of [Image Update Policies][image update guide]. It is possible for Jenkins to drive deployments with Flux in this way, without having or needing any direct access or explicit coordination with production environment or staging clusters.
+We recommend users implement SemVer and/or [Sortable image tags][Sortable image tags], to enable the use of [Image Update Policies][image update guide]. It is possible for Jenkins to drive deployments with Flux in this way securely through tags, without direct access or explicit coordination with production environment or staging clusters.
 
 GitOps principles suggest that we should manage production workloads as purely declarative artifacts that accurately describe the cluster state in enough detail to reproduce, including version information. Extrapolating the principles, we can also prescribe updates to container images with an automated process, and appropriately constrain this process to only new SemVer releases within a specified range.
 
-Many parts are needed for a complete continuous delivery pipeline with Jenkins and Flux. References are provided below to help highlight ideas that are likely present in a functioning Jenkins image build pipeline. We'll also provide an example you may use to build images for development and testing. Then, using another Jenkins stage, we run some tests in the image that was built, and finally make some CI decisions about whether to publish/release the image for deployment.
+#### Documentation References
 
-We can do testing without an image registry or pushing or pulling any image, because Jenkins builds the image locally on the build node, with a privileged pod that has direct access to Docker on the host. So (if we're using a single-node cluster for Jenkins, or by some other tricks perhaps ...) the image is created and used with the single node's Docker daemon.
+Many parts are needed for a complete continuous delivery pipeline with Jenkins and Flux.
+
+References are provided below to help highlight ideas that are likely to present in a functioning Jenkins image build pipeline. We'll also provide an example you may use to build images for development and testing. Then, with another Jenkins pipeline stage, we can run some tests in the image that was built.
+
+Finally, a release stage will publish/release image tags for production deployment, based on git tags.
+
+##### Testing Infrastructure
+
+We can do testing without an image registry or pushing or pulling any image, because Jenkins builds the image locally on the build node, with a privileged pod that has direct access to Docker on the host. This is significantly faster than pushing before testing.
+
+So (if we're using a single-node cluster for Jenkins, or by some other tricks perhaps ...) the image is created and used with the single node's Docker daemon.
 
 Those are some assumptions that you may need to check on... anyway, then we tag and push an image any time a new release version was tagged in Git, only after seeing the tests pass.
 
-Jenkins provides examples of declarative pipelines that use [credentials](https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/credentialsUsernamePassword.groovy) and show how you can use string data elements collected or composed in earlier stages, to drive downstream stages or scripts in different ways, or simply [populating environment variables](https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/scriptVariableAssignment.groovy).
+##### `jenkinsci/pipeline-examples` repo
 
-Another example executes certain workflow scripts [only against a particular branch](https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/whenBranchMaster.groovy). We may need to do all of these things, or similar ideas, in order to test and release new versions of our app in production.
+Jenkins provides examples of declarative pipelines that use [credentials] and show how you can use string data elements collected or composed in earlier stages, to drive downstream stages or scripts in different ways, or simply [populating environment variables].
 
-#### Example Jenkinsfile
+Another example executes certain workflow scripts [only against a particular branch]. We may need to do all of these things, or similar ideas, in order to test and release new versions of our app in production.
+
+For more information on Jenkins pipelines, visit the [jenkinsci/pipeline-examples] declarative examples.
+
+## Example Jenkinsfile
 
 Adapt this if needed, or add this to a project repository with a `Dockerfile` in its root, as a file `Jenkinsfile`, and configure a [Multibranch Pipeline][Creating a Multibranch Pipeline] to trigger when new commits are pushed to any branch or tag.
 
-Find this example in context at [kingdonb/jenkins-example-workflow](https://github.com/kingdonb/jenkins-example-workflow) where it is connected with a Jenkins server, and configured to build and push images to [docker.io/kingdonb/jenkins-example-workflow](https://hub.docker.com/r/kingdonb/jenkins-example-workflow/tags?page=1&ordering=last_updated).
+Find this example in context at [kingdonb/jenkins-example-workflow] where it is connected with a Jenkins server, and configured to build and push images to [docker.io/kingdonb/jenkins-example-workflow].
 
 ```groovy
 dockerRepoHost = 'docker.io'
@@ -201,39 +229,94 @@ pipeline {
 }
 ```
 
-The example above should do the necessary work for development and production. When you push a commit, it will be built and tested locally on the Jenkins node, and pushed in parallel to the image repository with a [Sortable image tag][Sortable image tags]. This can be deployed automatically by Flux, with a relaxed policy for development environments. There is no requirement that the tests pass in order to deploy the latest image in development. You can add such a requirement at a later stage, if it makes sense in your use case.
+The example above should do the necessary work for building, tagging, and pushing images for development and production.
 
-The corresponding Flux feature is covered in the [using an ImagePolicy object](/docs/guides/sortable-image-tags/#using-in-an-imagepolicy-object) section of the aforementioned guide.
+### Instructions for Use
 
-When you push a git tag, different workflow is used since git tags can be used for [Automating image updates to Git](/docs/guides/image-update/) in production. Using SemVer tags, you can automatically promote new tags to production via policy. In this guide we assume you will manually create and push Git tags. These builds will run `docker build` again for the tag, which will hopefully hit the cache, and will run tests again (even if already tested); the build job then pushes a new matching image tag upon successful execution of the tests.
+Fork the repo from [kingdonb/jenkins-example-workflow], to see the other details like a basic suitable example [Dockerfile], the [jenkins/docker-pod.yaml], and the [jenkins/run-tests.sh] script.
 
-You can find this example demonstrated in practice with a real (private) Jenkins instance at [kingdonb/example-jenkins-workflow](https://github.com/kingdonb/example-jenkins-workflow), where it has been configured to run as a Multi-branch pipeline as explained already.
+Create a Multibranch Pipeline and associate it with your repository. Configure it to build commits from at least one branch (or all branches) and any tags.
 
-Configuration of webhooks would be a logical next step if not already configured and working, so that Jenkins can trigger builds without polling. Demonstrating this CI feature is again something that is out of scope for this guide.
+#### Development Image
 
-### Wrap Up
+When you push a commit to a branch, it will be built and tested locally on the Jenkins node, and also a dev image is pushed in parallel to the image repository.
+
+This image is tagged with a [Sortable image tag][Sortable image tags] of the format `{branch}-{sha}-{ts}`.
+
+This can be deployed automatically by Flux, with a more relaxed policy for development environments. There is no requirement that tests must pass in order to deploy the latest image in development. You can add such a requirement later, or change this in any way that makes sense for your use case.
+
+#### Release `SemVer` Image
+
+We will confirm the tests are passing before pushing any production tag, in the `Push Release Tag` stage, which only runs after our `Test` stage has succeeded.
+
+The corresponding Flux resource is covered in the [using an ImagePolicy object] section of the aforementioned guide.
+
+When you push a git tag, different workflow is used because of:
+
+```
+when {
+  buildingTag()
+}
+```
+
+and
+
+```
+when {
+  not {
+    buildingTag()
+  }
+}
+```
+
+This is important since git tags can be used for [Automating image updates to Git](/docs/guides/image-update/) in production.
+
+Using SemVer tags, you can automatically promote new tags to production via policy.
+
+In this guide we assume you will manually create and push Git tags whenever needed, then promote them through the pipeline. These builds will run `docker build` again for the tag, which should hit the cache and complete quickly, then run tests again, and finally on success push a SemVer image tag.
+
+#### Example Resources
+
+You can find this example tested with a Jenkins instance at [kingdonb/jenkins-example-workflow]; it has been configured to run as you can see from the commit status checks found on all commits, tags, and pull requests. The images are pushed to [docker.io/kingdonb/jenkins-example-workflow].
+
+Configuration of webhooks would be a logical next step if not already configured and working, so that Jenkins can trigger builds without polling or manual intervention by an operator. Demonstrating this advanced CI feature of Jenkins is again something that is out of scope for this guide.
+
+#### Wrap Up
+
+By pushing image tags, Jenkins can update the cluster using Flux's pull-based model for updating. When a new image is pushed that has a newer image tag, and meets the filters of the configured policy, Flux is made aware of it by Image Reflector API, which captures the new candidate tag as an Image resource.
 
 Your CI workflow can be based on these examples, or may turn out completely different. Jenkins has a rich ecosystem of plugins, and the Jenkinsfile is as diverse and powerful as any programming language. If you are using Jenkins already, you probably already know exactly how you want it to build images.
 
-If you are concerned about running Docker and Kubernetes together, or if you need to use these workflows in a cluster that cannot run container images as root, or in privileged mode, for an alternative build strategy that can still work with Jenkins in rootless mode, we recommend you check out [Kubernetes examples for Buildkit](https://github.com/moby/buildkit/tree/master/examples/kubernetes) and the [Buildkit CLI for Kubectl](https://github.com/vmware-tanzu/buildkit-cli-for-kubectl). These were recently presented together at [KubeCon/CloudNativeCon EU 2021](https://www.youtube.com/watch?v=vTh6jkW_xtI).
+If you are concerned about running Docker and Kubernetes together, or if you need to use these workflows in a cluster that cannot run container images as root, or in privileged mode, for an alternative build strategy that can still work with Jenkins in rootless mode, we recommend you check out [Kubernetes examples for Buildkit] and the [Buildkit CLI for Kubectl]. These were recently presented together at [KubeCon/CloudNativeCon EU 2021].
 
-The finer points of building OCI images in Jenkins are out of scope for this guide. These examples are meant to be kept simple (though they should be complete), and we refrain from sharing strong opinions about how CI should work here, because it's simply out of scope for Flux to weigh in about these things. We meant to show some ways that Jenkins (or any similar functioning CI tool) can interact with Flux. This works without Jenkins being connected to production clusters, only building images, and interfacing with Flux only by publishing image tags, so there is no strong coupling or inter-dependency between CI and CD.
+The finer points of building OCI images in Jenkins are out of scope for this guide. These examples are meant to be kept simple (though they should be complete), and we refrain from sharing strong opinions about how CI should work here, because it's simply out of scope for Flux to weigh in about these things. We meant to show some ways that Jenkins (or any similar functioning CI tool) can interact with Flux.
 
-Update deployments via Flux's [ImagePolicy](https://fluxcd.io/docs/guides/sortable-image-tags/#using-in-an-imagepolicy-object) CRD, and the Image Update Automation API.
+This works without Jenkins connecting to production clusters, only building images, and Flux only receives published image tags. So there is no strong coupling or inter-dependency between CI and CD!
 
-By pushing image tags, Jenkins can update the cluster using Flux's pull-based model for updating. When a new image is pushed that has a higher-sorted image tag, and meets the range or filter specifications of the policy, Flux is made aware of it by Image Reflector API, which captures the new candidate tag as an Image resource.
+Update deployments via Flux's [ImagePolicy] CRD, and the Image Update Automation API.
 
 [GitOps Principles]: https://www.gitops.tech/#how-does-gitops-work
-[image update guide]: /guides/image-update/
-[any old app (Jenkins edition)]: https://github.com/kingdonb/any_old_app/tree/jenkins
-[Flux bootstrap guide]: /get-started/
-[String Substitution with sed -i]: #string-substitution-with-sed-i
-[Docker Build and Tag with Version]: #docker-build-and-tag-with-version
-[Jsonnet for YAML Document Rehydration]: #jsonnet-for-yaml-document-rehydration
-[Commit Across Repositories Workflow]: #commit-across-repositories-workflow
-[01-manifest-generate.yaml]: https://github.com/kingdonb/any_old_app/blob/main/.github/workflows/01-manifest-generate.yaml
-[some guidance has changed since Flux v1]: https://github.com/fluxcd/flux2/discussions/802#discussioncomment-320189
-[Sortable image tags]: /guides/sortable-image-tags/
+[Porter]: https://porter.sh
+[Buildpacks.io]: https://buildpacks.io
+[Earthfile]: https://earthly.dev
+[declarative pipelines]: https://www.jenkins.io/doc/book/pipeline/docker/
+[docker plugin]: https://plugins.jenkins.io/docker-plugin/
+[doesn't even have Docker underneath]: https://kubernetes.io/blog/2020/12/02/dockershim-faq/#why-is-dockershim-being-deprecated
+[Mirantis has taken over support of dockershim]: https://www.mirantis.com/blog/mirantis-to-take-over-support-of-kubernetes-dockershim-2/
+[Sortable image tags]: /docs/guides/sortable-image-tags/
+[image update guide]: /docs/guides/image-update/
+[credentials]: https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/credentialsUsernamePassword.groovy
+[populating environment variables]: https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/scriptVariableAssignment.groovy
+[only against a particular branch]: https://github.com/jenkinsci/pipeline-examples/blob/master/declarative-examples/simple-examples/whenBranchMaster.groovy
+[jenkinsci/pipeline-examples]: https://github.com/jenkinsci/pipeline-examples/tree/master/declarative-examples
 [Creating a Multibranch Pipeline]: https://www.jenkins.io/doc/book/pipeline/multibranch/#creating-a-multibranch-pipeline
-[Image Automation Controllers]: /components/image/controller/
-[Example of a build process with timestamp tagging]: /guides/sortable-image-tags/#example-of-a-build-process-with-timestamp-tagging
+[kingdonb/jenkins-example-workflow]: https://github.com/kingdonb/jenkins-example-workflow
+[docker.io/kingdonb/jenkins-example-workflow]: https://hub.docker.com/r/kingdonb/jenkins-example-workflow/tags?page=1&ordering=last_updated
+[Dockerfile]: https://github.com/kingdonb/jenkins-example-workflow/blob/main/Dockerfile
+[jenkins/docker-pod.yaml]: https://github.com/kingdonb/jenkins-example-workflow/blob/main/jenkins/docker-pod.yaml
+[jenkins/run-tests.sh]: https://github.com/kingdonb/jenkins-example-workflow/blob/main/jenkins/run-tests.sh
+[using an ImagePolicy object]: /docs/guides/sortable-image-tags/#using-in-an-imagepolicy-object
+[Kubernetes examples for Buildkit]: https://github.com/moby/buildkit/tree/master/examples/kubernetes
+[Buildkit CLI for Kubectl]: https://github.com/vmware-tanzu/buildkit-cli-for-kubectl
+[KubeCon/CloudNativeCon EU 2021]: https://www.youtube.com/watch?v=vTh6jkW_xtI
+[ImagePolicy]: https://fluxcd.io/docs/guides/sortable-image-tags/#using-in-an-imagepolicy-object
